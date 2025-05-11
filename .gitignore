@@ -1,0 +1,4 @@
+__pycache__
+*.tfrecords
+.DS_Store
+*.json
