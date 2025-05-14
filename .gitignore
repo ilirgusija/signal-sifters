@@ -2,3 +2,5 @@ __pycache__
 *.tfrecords
 .DS_Store
 *.json
+!data/splits.py
+*.npz
