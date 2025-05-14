@@ -10,7 +10,7 @@ class DichasusDataset(Dataset):
     Can be initialized from a dict of numpy arrays or from a single .npz file path.
     """
 
-    def __init__(self, data):
+    def __init__(self, data, device='cpu'):
         """
         Args:
             data: dict of numpy arrays (with keys 'csi', 'time', and optionally 'pos'),
@@ -21,26 +21,30 @@ class DichasusDataset(Dataset):
             root_dir = os.path.dirname(os.path.abspath(__file__))
             npz_path = os.path.join(root_dir, "../../data", data)
             loaded = np.load(npz_path)
-            self.csi = loaded['csi']
-            self.time = loaded['time']
-            self.pos = loaded['pos'] if 'pos' in loaded.files else None
+            self.csi = torch.from_numpy(loaded['csi'])
+            self.time = torch.from_numpy(loaded['time'])
+            self.pos = torch.from_numpy(loaded['pos']) if 'pos' in loaded.files else None
         elif isinstance(data, dict):
-            self.csi = data['csi']
-            self.time = data['time']
-            self.pos = data.get('pos', None)
+            self.csi = torch.from_numpy(data['csi'])
+            self.time = torch.from_numpy(data['time'])
+            self.pos = torch.from_numpy(data.get('pos', None))
         else:
             raise ValueError(
                 "DichasusDataset expects a dict of numpy arrays or a .npz file path.")
+        self.csi = self.csi.to(device)
+        self.time = self.time.to(device)
         self.labeled = self.pos is not None
+        if self.labeled:
+            self.pos = self.pos.to(device)
 
     def __len__(self):
         return len(self.csi)
 
     def __getitem__(self, idx):
-        csi = torch.from_numpy(self.csi[idx])
-        time = torch.from_numpy(np.array(self.time[idx]))
+        csi = self.csi[idx]
+        time = self.time[idx]
         if self.labeled:
-            pos = torch.from_numpy(self.pos[idx])
+            pos = self.pos[idx]
             return csi, pos, time
         else:
             return csi, time

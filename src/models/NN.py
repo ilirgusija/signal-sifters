@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import sys
 
 class NN(nn.Module):
     # input: 4096
@@ -14,6 +15,9 @@ class NN(nn.Module):
         self.fc6 = nn.Linear(64, 2)
 
     def forward(self, x):
+        x = x.flatten(start_dim=1)
+        x = self.complex_to_real(x)
+        # print(x.shape)
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))

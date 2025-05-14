@@ -2,16 +2,24 @@
 
 import torch
 import numpy as np
+import sys
 
 
 # \alpha*mean + \mbb{E}(1-\alpha)e^{beta*error^2}
 def train_loss(positions_estimated, position_labels, alpha=0.5, beta=10.0):
+    # print(positions_estimated.shape)
+    # print(position_labels.shape)
+
+    # sys.exit()
+    # cut off last dimension of labels
+    position_labels = position_labels[:, :2]
+
     errorvectors = position_labels - positions_estimated
     errors = torch.sqrt(errorvectors[:, 0] ** 2 + errorvectors[:, 1] ** 2)
     return alpha * torch.mean(errors) + (1 - alpha) * torch.mean(torch.exp(beta * (errors ** 2)))
 
 
-def compute_localization_metrics(positions_estimated, position_labels):
+def ai_slop(positions_estimated, position_labels):
     # positions_estimated, position_labels: (batch_size, 2) or (batch_size, 3)
     errorvectors = position_labels - positions_estimated
     errors = torch.sqrt(errorvectors[:, 0] ** 2 + errorvectors[:, 1] ** 2)
