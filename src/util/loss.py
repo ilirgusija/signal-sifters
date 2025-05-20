@@ -19,13 +19,56 @@ def train_loss(positions_estimated, position_labels, alpha=0.5, beta=10.0):
     return alpha * torch.mean(errors) + (1 - alpha) * torch.mean(torch.exp(beta * (errors ** 2)))
 
 
-def ai_slop(positions_estimated, position_labels):
+def differentiable_r90(errors):
+    """
+    Differentiable approximation of R90 using soft ranking.
+    Instead of taking a hard 90th percentile, we use a soft approximation
+    that considers all errors with appropriate weighting.
+    """
+    # Sort errors
+    sorted_errors, _ = torch.sort(errors)
+    batch_size = errors.shape[0]
+    
+    # Calculate the index that would represent the 90th percentile
+    target_idx = int(0.9 * batch_size)
+    
+    # Create weights that peak around the 90th percentile
+    # Using a soft approximation with temperature
+    temperature = 10.0
+    indices = torch.arange(batch_size, device=errors.device)
+    weights = torch.exp(-temperature * torch.abs(indices - target_idx))
+    weights = weights / weights.sum()  # normalize weights
+    
+    # Compute weighted sum of errors as R90 approximation
+    r90_approx = (sorted_errors * weights).sum()
+    
+    return r90_approx
+
+
+def ai_slop(positions_estimated, position_labels, alpha=0.5):
+    """
+    Combined loss function using both MAE and a differentiable R90 approximation
+    """
     # positions_estimated, position_labels: (batch_size, 2) or (batch_size, 3)
     errorvectors = position_labels - positions_estimated
     errors = torch.sqrt(errorvectors[:, 0] ** 2 + errorvectors[:, 1] ** 2)
+    
+    # Calculate MAE
     mae = torch.mean(errors)
-    # r90 is not differentiable due to percentile, so we return only mae for differentiability
-    return mae
+    
+    # Calculate differentiable R90
+    r90 = differentiable_r90(errors)
+    
+    # Combine both metrics with equal weighting
+    combined_loss = alpha * mae + (1 - alpha) * r90
+    
+    return combined_loss
+
+# Function that was the old ai_slop (just the MAE):
+def old_ai_slop(positions_estimated, position_labels):
+    errorvectors = position_labels - positions_estimated
+    errors = torch.sqrt(errorvectors[:, 0] ** 2 + errorvectors[:, 1] ** 2)
+    return torch.mean(errors)
 
 # ===============================
 # ===============================
