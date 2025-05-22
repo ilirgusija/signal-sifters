@@ -27,7 +27,8 @@ class DichasusDataset(Dataset):
         elif isinstance(data, dict):
             self.csi = torch.from_numpy(data['csi'])
             self.time = torch.from_numpy(data['time'])
-            self.pos = torch.from_numpy(data.get('pos', None))
+            pos_data = data.get('pos', None)
+            self.pos = torch.from_numpy(pos_data) if pos_data is not None else None
         else:
             raise ValueError(
                 "DichasusDataset expects a dict of numpy arrays or a .npz file path.")
