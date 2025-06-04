@@ -20,27 +20,32 @@ def train(model, dataloader, optimizer, scheduler, loss_fn, epochs=1, lr=1e-2, l
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lr_lambda)
     history = []
-    for epoch in tqdm(range(epochs), desc="Epochs"):
+
+    for _ in tqdm(range(epochs), desc="Epochs"):
         model.train()
         epoch_loss = 0
         for batch_idx, (indices, y_true) in enumerate(tqdm(dataloader, desc="Batches", leave=False)):
+            # if batch_idx < 1805:
+            #     continue
             indices, y_true = indices.long().to(device), y_true.to(device)
             optimizer.zero_grad()
 
             # Forward pass
             y_pred = model.forward(indices)
+            assert not torch.isnan(y_pred).any(), "y_pred is NaN"
+
 
             # Call metric to update callback state
             if plot_callback is not None:
                 plot_callback.metric(y_true, y_pred)
             loss = loss_fn(y_true, y_pred)
-            # Terminate on NaN
-            if torch.isnan(loss):
-                print(
-                    f"NaN loss encountered at epoch {epoch}, batch {batch_idx}. Stopping training.")
-                if plot_callback is not None:
-                    plot_callback.on_train_end()
-                return history
+            # # Terminate on NaN
+            # if torch.isnan(loss):
+            #     print(
+            #         f"NaN loss encountered at epoch {epoch}, batch {batch_idx}. Stopping training.")
+            #     if plot_callback is not None:
+            #         plot_callback.on_train_end()
+            #     return history
 
             # Backward pass
             loss.backward()

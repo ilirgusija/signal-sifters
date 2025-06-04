@@ -4,7 +4,7 @@ import numpy as np
 import os
 from src.models.gaussian_dissimilarity import GaussianDissimilarityModel
 from tqdm.auto import tqdm
-
+import multiprocessing as mp
 
 class DichasusDataset(Dataset):
     """
@@ -81,11 +81,10 @@ class ChannelChartingPathDataset(Dataset):
     PyTorch Dataset for generating random path batches for ChannelChart training.
     Each item is a tuple (indices, y_true) for a batch.
     """
-
+    
     def __init__(self, GDM: GaussianDissimilarityModel, csi_time_domain, training_batches=2000, max_pathhops=100,
                  min_batch_size=1500, max_batch_size=4000, min_hoplength=0.25, max_hoplength=10.0,
                  randomize_pathhops=False, device='cpu'):
-        print("Initializing ChannelChartingPathDataset")
         self.GDM = GDM
         self.csi_time_domain = csi_time_domain
         self.training_batches = training_batches
@@ -97,11 +96,39 @@ class ChannelChartingPathDataset(Dataset):
         self.randomize_pathhops = randomize_pathhops
         self.device = device
 
-        # Pregenerate all batches and store them in a list
-        self.pregenerated_batches = []
-        indices = torch.arange(
-            self.csi_time_domain.shape[0], device=self.device)
-        for batch_count in tqdm(range(self.training_batches), desc="Pre-computing training paths"):
+        self.y_true_pregenerated = dict()
+        with tqdm(total=training_batches + 5, desc="Pre-computing training paths") as pbar:
+            todo_queue = mp.Queue()
+            output_queue = mp.Queue()
+
+            for batch in tqdm(range(training_batches + 5), desc="Preparing multiprocessing inputs"):
+                todo_queue.put(batch)
+
+            process_count = mp.cpu_count()
+
+            for _ in tqdm(range(process_count), desc="Starting Processes"):
+                todo_queue.put(-1)
+                p = mp.Process(target=self.batch_generator_worker,
+                               args=(todo_queue, output_queue))
+                p.start()
+
+            finished_processes = 0
+            while finished_processes != process_count:
+                batch_count, y_true = output_queue.get()
+
+                if batch_count == -1:
+                    finished_processes = finished_processes + 1
+                else:
+                    self.y_true_pregenerated[batch_count] = y_true
+                    pbar.update(1)
+                    
+    def batch_generator_worker(self, todo_queue, output_queue):
+        while True:
+            batch_count = todo_queue.get()
+
+            if batch_count == -1:
+                output_queue.put((-1, None))
+                break
 
             # Determine current batch size
             batch_size = int(
@@ -110,6 +137,7 @@ class ChannelChartingPathDataset(Dataset):
                     (self.max_batch_size - self.min_batch_size) + self.min_batch_size
                 )
             )
+
             # Round batch size to nearest steps of 200 to prevent re-tracing compute graph too often
             batch_size = int(round(batch_size / 200) * 200)
 
@@ -117,20 +145,18 @@ class ChannelChartingPathDataset(Dataset):
             pathhops_length_limit = (batch_count / self.training_batches) ** 0.15 * (
                 self.min_hoplength - self.max_hoplength) + self.max_hoplength
             if self.randomize_pathhops:
-                pathhops_maxlength = np.random.uniform(
-                    pathhops_length_limit, self.max_hoplength, size=batch_size)
+                pathhops_maxlength = torch.rand(
+                    size=(batch_size,), device=self.device) * (self.max_hoplength - self.pathhops_length_limit) + pathhops_length_limit
             else:
-                pathhops_maxlength = np.ones(
-                    batch_size, dtype=np.float32) * pathhops_length_limit
+                pathhops_maxlength = torch.ones(
+                    batch_size, dtype=torch.float32) * pathhops_length_limit
 
             # Generate random short paths and assemble y_true, consisting of batch_size paths, each made up of
             # * number of path hops
             # * mean value of dissimilarity random variable
             # * variance of  dissimilarity random variable
             # * datapoint indices along path; ends with repeating last index if too few hops
-            paths, path_hops, total_dissimilarity_means, total_dissimilarity_variances = self.GDM.get_random_short_paths(
-                batch_size, pathhops_maxlength)
-            # print("Assertion check:")
+            paths, path_hops, total_dissimilarity_means, total_dissimilarity_variances = self.GDM.get_random_short_paths(batch_size, pathhops_maxlength)
             assert torch.all(path_hops <= paths.shape[1] - 1), (
                 f"Found path_hops > max index: max(path_hops)={path_hops.max()} vs paths.shape[1]-1={paths.shape[1]-1}"
             )
@@ -141,18 +167,80 @@ class ChannelChartingPathDataset(Dataset):
                 total_dissimilarity_means[:, None],
                 total_dissimilarity_variances[:, None],
                 paths
-            ])
-            y_true = y_true.to(self.device)
-            self.pregenerated_batches.append((indices, y_true))
+            ]).to(self.device)
+            output_queue.put((batch_count, y_true))
+
+    # def __init__(self, GDM: GaussianDissimilarityModel, csi_time_domain, training_batches=2000, max_pathhops=100,
+    #              min_batch_size=1500, max_batch_size=4000, min_hoplength=0.25, max_hoplength=10.0,
+    #              randomize_pathhops=False, device='cpu'):
+    #     print("Initializing ChannelChartingPathDataset")
+    #     self.GDM = GDM
+    #     self.csi_time_domain = csi_time_domain
+    #     self.training_batches = training_batches
+    #     self.max_pathhops = max_pathhops
+    #     self.min_batch_size = min_batch_size
+    #     self.max_batch_size = max_batch_size
+    #     self.min_hoplength = min_hoplength
+    #     self.max_hoplength = max_hoplength
+    #     self.randomize_pathhops = randomize_pathhops
+    #     self.device = device
+
+    #     # Pregenerate all batches and store them in a list
+    #     self.pregenerated_batches = []
+    #     indices = torch.arange(
+    #         self.csi_time_domain.shape[0], device=self.device)
+    #     for batch_count in tqdm(range(self.training_batches), desc="Pre-computing training paths"):
+
+    #         # Determine current batch size
+    #         batch_size = int(
+    #             round(
+    #                 batch_count / self.training_batches *
+    #                 (self.max_batch_size - self.min_batch_size) + self.min_batch_size
+    #             )
+    #         )
+    #         # Round batch size to nearest steps of 200 to prevent re-tracing compute graph too often
+    #         batch_size = int(round(batch_size / 200) * 200)
+
+    #         # Determine number of hops for current subsampling ratio
+    #         pathhops_length_limit = (batch_count / self.training_batches) ** 0.15 * (
+    #             self.min_hoplength - self.max_hoplength) + self.max_hoplength
+    #         if self.randomize_pathhops:
+    #             pathhops_maxlength = np.random.uniform(
+    #                 pathhops_length_limit, self.max_hoplength, size=batch_size)
+    #         else:
+    #             pathhops_maxlength = np.ones(
+    #                 batch_size, dtype=np.float32) * pathhops_length_limit
+
+    #         # Generate random short paths and assemble y_true, consisting of batch_size paths, each made up of
+    #         # * number of path hops
+    #         # * mean value of dissimilarity random variable
+    #         # * variance of  dissimilarity random variable
+    #         # * datapoint indices along path; ends with repeating last index if too few hops
+    #         paths, path_hops, total_dissimilarity_means, total_dissimilarity_variances = self.GDM.get_random_short_paths(
+    #             batch_size, pathhops_maxlength)
+    #         # print("Assertion check:")
+    #         assert torch.all(path_hops <= paths.shape[1] - 1), (
+    #             f"Found path_hops > max index: max(path_hops)={path_hops.max()} vs paths.shape[1]-1={paths.shape[1]-1}"
+    #         )
+    #         paths = paths[:, :self.max_pathhops + 1]
+    #         y_true = torch.hstack([
+    #             # None is analogous to np.newaxis
+    #             path_hops[:, None],
+    #             total_dissimilarity_means[:, None],
+    #             total_dissimilarity_variances[:, None],
+    #             paths
+    #         ]).to(self.device)
+    #         y_true = y_true.to(self.device)
+    #         self.pregenerated_batches.append((indices, y_true))
 
     def save(self):
         # Save pregenerated_batches and any other relevant info
         data_dir = os.path.join(os.getcwd(), "../data/processed/preprocessed")
         os.makedirs(data_dir, exist_ok=True)
-        path = os.path.join(data_dir, "pregenerated_batches.pt")
-        print(f"Saving pregenerated batches to {path}")
+        path = os.path.join(data_dir, "y_true_pregenerated.pt")
+        print(f"Saving y_true_pregenerated to {path}")
         data = {
-            'pregenerated_batches': self.pregenerated_batches,
+            'y_true_pregenerated': self.y_true_pregenerated,
             'max_pathhops': self.max_pathhops,
             'training_batches': self.training_batches,
             'min_batch_size': self.min_batch_size,
@@ -169,7 +257,7 @@ class ChannelChartingPathDataset(Dataset):
         # Load pregenerated_batches and create a new instance
         obj = cls.__new__(cls)  # Create instance without calling __init__
         data_dir = os.path.join(os.getcwd(), "../data/processed/preprocessed")
-        path = os.path.join(data_dir, "pregenerated_batches.pt")
+        path = os.path.join(data_dir, "y_true_pregenerated.pt")
         data = torch.load(path, map_location=device)
         # Manually set attributes
         obj.GDM = GDM
@@ -177,7 +265,7 @@ class ChannelChartingPathDataset(Dataset):
         obj.device = device
         obj.max_pathhops = data['max_pathhops']
         obj.training_batches = data['training_batches']
-        obj.pregenerated_batches = data['pregenerated_batches']
+        obj.y_true_pregenerated = data['y_true_pregenerated']
         obj.min_batch_size = data['min_batch_size']
         obj.max_batch_size = data['max_batch_size']
         obj.min_hoplength = data['min_hoplength']

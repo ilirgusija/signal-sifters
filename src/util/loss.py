@@ -135,6 +135,8 @@ class ChannelChartingLoss(nn.Module):
         # This works as long as CSI tensor is not absolutely huge (16M+ entries), which can be assumed.
         # y_true: (B, 3+longest_shortest_path), y_pred: (N, D)
         # y_true: [path_hops, path_means, path_variances, paths...] (B, 3+longest_shortest_path)
+        assert not torch.isnan(y_true).any(), "y_true is NaN"
+        assert not torch.isnan(y_pred).any(), "y_pred is NaN"
         y_true = y_true.squeeze(0)
         path_hops = y_true[:, 0].long()
         path_means = y_true[:, 1]
@@ -143,13 +145,27 @@ class ChannelChartingLoss(nn.Module):
 
         path_end_indices = torch.transpose(
             torch.stack(
-                [torch.arange(y_true.shape[0],
-                              device=y_true.device), path_hops]
+                [torch.arange(y_true.shape[0]), path_hops]
             ), 0, 1
         )
-
+        longest_shortest_path = paths.shape[1]
+        # if path_hops contains longest_shortest_path, set it to 0
+        path_hops = torch.where(path_hops >= longest_shortest_path, 0, path_hops)
         index_A = y_true[:, 3].long()
-        index_B = paths[torch.arange(paths.shape[0]), path_hops].long()
+        try:
+            index_B = paths[torch.arange(y_true.shape[0]), path_hops].long()
+        except IndexError as e:
+            # print original error message
+            print(f"IndexError: {e}")
+            print(f"paths.shape: {paths.shape}")
+            print(f"torch.arange(paths.shape[0]).shape: {torch.arange(paths.shape[0]).shape}")
+            print(f"path_hops.shape: {path_hops.shape}")
+            print(f"y_true.shape: {y_true.shape}")
+            print(f"index_A.shape: {index_A.shape}")
+            print(f"path_end_indices.shape: {path_end_indices.shape}")
+            print(f"path_end_indices[:,0].shape: {path_end_indices[:,0].shape}")
+            print(f"path_end_indices[:,1].shape: {path_end_indices[:,1].shape}")
+            raise IndexError
 
         pos_A = y_pred[index_A]
         pos_B = y_pred[index_B]
@@ -181,6 +197,10 @@ class ChannelChartingLoss(nn.Module):
             torch.sum(torch.clamp(
                 path_distances - endpoint_distances.unsqueeze(1), min=0)
             )
+        
+        assert not torch.isnan(acceleration_loss), "Acceleration loss is NaN"
+        assert not torch.isnan(geodesic_loss), "Geodesic loss is NaN"
 
         # Combination
-        return geodesic_loss + self.acceleration_weight * acceleration_loss
+        loss = geodesic_loss + self.acceleration_weight * acceleration_loss
+        return loss
