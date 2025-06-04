@@ -7,6 +7,8 @@ import json
 import sys
 import os
 
+FREQ_DOMAIN = False
+
 DATASET_DIR = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "../../data")
 
@@ -115,14 +117,19 @@ def parse_and_calibrate(path, offset_path):
 
     def shrink_csi(target_subcarrier_count=64):
         def compression(csi, pos, time):
-            csi_tdomain = tf.signal.fftshift(tf.signal.ifft(
-                tf.signal.fftshift(csi, axes=-1)), axes=-1)
+            csi_tdomain = tf.signal.fftshift(
+                tf.signal.ifft(
+                    tf.signal.fftshift(csi, axes=-1)
+                ), 
+                axes=-1
+            )
             mid = RAW_SUBCARRIER_COUNT // 2
             half = target_subcarrier_count // 2
             csi_tdomain_compressed = csi_tdomain[..., mid-half:mid+half]
-            csi = tf.signal.fftshift(tf.signal.fft(tf.signal.fftshift(
-                csi_tdomain_compressed, axes=-1)), axes=-1)
-            return csi, pos, time
+            if FREQ_DOMAIN:
+                csi = tf.signal.fftshift(tf.signal.fft(tf.signal.fftshift(
+                    csi_tdomain_compressed, axes=-1)), axes=-1)
+            return csi_tdomain_compressed, pos, time
 
         return compression
 

@@ -2,5 +2,14 @@ __pycache__
 *.tfrecords
 .DS_Store
 *.json
+data/processed/*
+data/raw/*
+!data/processed/preprocessed
+data/processed/preprocessed/*
 !data/splits.py
-*.npzbest_model.pth
+*.npz
+best_model.pth
+Geodesic-Uncertainty-Loss-ChannelCharting/
+*.pt
+*.pth
+*.pkl
