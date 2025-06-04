@@ -59,9 +59,9 @@ class PlotChartCallback:
         if title is not None:
             plt.title(title, fontsize=16)
         plt.scatter(
-            positions[:, 0].cpu().numpy(),
-            positions[:, 1].cpu().numpy(),
-            c=rgb_values.cpu().numpy(),
+            positions[:, 0].detach().cpu().numpy(),
+            positions[:, 1].detach().cpu().numpy(),
+            c=rgb_values.detach().cpu().numpy(),
             alpha=alpha, s=10, linewidths=0
         )
         plt.xlabel("x coordinate")
@@ -100,13 +100,14 @@ class PlotChartCallback:
                 title=f"MAE = {mae:.4f}m, CEP = {cep:.4f}m", show=False
             )
 
-            y_true_np = self.y_true.to(torch.int32).cpu().numpy()
+            y_true_np = self.y_true.detach().to(torch.int32).cpu().numpy()
             paths_indices = y_true_np[:, 3:]
 
             for path_indices in paths_indices:
                 # Remove any padding (e.g., repeated last index)
                 path_indices = path_indices[path_indices >= 0]
-                path_positions = pred_positions[path_indices].cpu().numpy()
+                path_positions = pred_positions[path_indices].detach().cpu(
+                ).numpy()
                 plt.plot(path_positions[:, 0], path_positions[:, 1])
 
             plt.show()
